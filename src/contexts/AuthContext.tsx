@@ -1,5 +1,5 @@
 import React, { createContext, useState, useEffect, useCallback, ReactNode, useMemo } from 'react';
-import { User as SupabaseUser, AuthChangeEvent, Session } from '@supabase/supabase-js';
+import { User as SupabaseUser } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabaseClient';
 import { User } from '../types';
 
@@ -58,41 +58,11 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   }, []);
 
   useEffect(() => {
-    let timeoutId: number;
-    
-    const initializeAuth = async () => {
-      try {
-        // First, get the current session
-        const { data: { session }, error } = await supabase.auth.getSession();
-        
-        if (error) {
-          console.error("Error getting session:", error);
-          setUser(null);
-          setLoading(false);
-          return;
-        }
-
-        // Process the current session
-        if (session?.user) {
-          const profile = await getProfile(session.user);
-          setUser(profile);
-        } else {
-          setUser(null);
-        }
-        
-        setLoading(false);
-      } catch (error) {
-        console.error("Error initializing auth:", error);
-        setUser(null);
-        setLoading(false);
-      }
-    };
-
-    // Set up auth state change listener
+    // This is the definitive fix.
+    // We rely solely on onAuthStateChange. It fires immediately on load with the current session,
+    // and then listens for subsequent changes. This is the most robust pattern.
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (event: AuthChangeEvent, session: Session | null) => {
-        console.log('Auth state changed:', event, session?.user?.email);
-        
+      async (_event, session) => {
         try {
           if (session?.user) {
             const profile = await getProfile(session.user);
@@ -104,25 +74,15 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           console.error("Error processing auth state change:", error);
           setUser(null);
         } finally {
+          // As soon as the first auth state is processed (user or null),
+          // stop the loading screen. This is guaranteed to run.
           setLoading(false);
         }
       }
     );
 
-    // Initialize auth immediately
-    initializeAuth();
-
-    // Safety timeout to prevent infinite loading
-    timeoutId = setTimeout(() => {
-      console.warn('Auth initialization timeout - stopping loading state');
-      setLoading(false);
-    }, 10000); // 10 seconds timeout
-
     return () => {
       subscription?.unsubscribe();
-      if (timeoutId) {
-        clearTimeout(timeoutId);
-      }
     };
   }, [getProfile]);
 
